@@ -1,0 +1,323 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- ENUMS ---
+
+enum UserRole {
+  citizen
+  volunteer
+  responder
+  admin
+  super_admin
+}
+
+enum WarningLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  REPORTED
+  ASSESSING
+  ACTIVE
+  MITIGATED
+  CLOSED
+}
+
+enum AidRequestStatus {
+  PENDING
+  REVIEWED
+  APPROVED
+  FULFILLED
+  REJECTED
+}
+
+enum AssignmentStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+}
+
+enum InventoryType {
+  MEDICAL
+  FOOD
+  SHELTER
+  WATER
+  OTHER
+}
+
+enum ResourceLogType {
+  INFLOW
+  OUTFLOW
+}
+
+// --- CORE MODELS ---
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  phone        String?
+  role         UserRole @default(citizen)
+  isActive     Boolean  @default(true)
+  isVerified   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relationships
+  aidRequests           AidRequest[]
+  registrations         DrillRegistration[]
+  incidentsReported     Incident[]             @relation("ReportedIncidents")
+  assignments           Assignment[]           @relation("AssignedTo")
+  shelterCheckins       ShelterCheckin[]
+  assessments           Assessment[]
+  messagesSent          Message[]
+  conversations         Conversation[] // Users in a conversation
+  preparednessChecklist PreparednessChecklist?
+
+  responderProfile Responder?
+}
+
+// Separate model for a Responder's specific status/location
+model Responder {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id])
+  isAvailable     Boolean  @default(false)
+  currentLocation String? // Geo-coordinate string (e.g., "lat,lng")
+  specialty       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// --- PRE-DISASTER MODULES ---
+
+model HazardZone {
+  id           String       @id @default(uuid())
+  name         String
+  type         String // e.g., "Flood Zone", "Earthquake Fault"
+  geometryData String // Storing GeoJSON or WKT string
+  riskLevel    WarningLevel @default(MEDIUM)
+  adminNotes   String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  warnings Warning[]
+}
+
+model Warning {
+  id           String       @id @default(uuid())
+  hazardZoneId String
+  hazardZone   HazardZone   @relation(fields: [hazardZoneId], references: [id])
+  title        String
+  description  String
+  level        WarningLevel @default(MEDIUM)
+  issuedBy     String // User ID or Agency Name
+  validUntil   DateTime?
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model ChecklistItem {
+  id          String @id @default(uuid())
+  title       String
+  description String
+  category    String // e.g., "Medical", "Go-Bag", "Family Plan"
+
+  preparedness PreparednessChecklist[]
+}
+
+model PreparednessChecklist {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id])
+  // An array of IDs of ChecklistItems completed by the user
+  completedItemIds String[]
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  checklistItem   ChecklistItem? @relation(fields: [checklistItemId], references: [id])
+  checklistItemId String?
+}
+
+model Drill {
+  id            String   @id @default(uuid())
+  title         String
+  description   String
+  scheduledTime DateTime
+  location      String
+  drillType     String // e.g., "Evacuation", "Shelter-in-Place"
+
+  registrations DrillRegistration[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+}
+
+model DrillRegistration {
+  id               String   @id @default(uuid())
+  drillId          String
+  drill            Drill    @relation(fields: [drillId], references: [id])
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  attended         Boolean  @default(false)
+  registrationDate DateTime @default(now())
+
+  @@unique([drillId, userId]) // A user can only register for a drill once
+}
+
+// --- POST-DISASTER MODULES ---
+
+model Incident {
+  id          String         @id @default(uuid())
+  title       String
+  description String
+  type        String // e.g., "Earthquake", "Tornado", "Fire"
+  location    String // Geo-coordinate string (e.g., "lat,lng")
+  reporterId  String
+  reporter    User           @relation("ReportedIncidents", fields: [reporterId], references: [id])
+  status      IncidentStatus @default(REPORTED)
+  severity    WarningLevel   @default(MEDIUM)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  aidRequests AidRequest[]
+  assignments Assignment[]
+  assessments Assessment[]
+}
+
+model AidRequest {
+  id          String           @id @default(uuid())
+  incidentId  String
+  incident    Incident         @relation(fields: [incidentId], references: [id])
+  requesterId String
+  requester   User             @relation(fields: [requesterId], references: [id])
+  itemNeeded  String // e.g., "Water (50L)", "Medical Kit"
+  quantity    Int
+  status      AidRequestStatus @default(PENDING)
+  priority    WarningLevel     @default(MEDIUM)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Assignment {
+  id           String           @id @default(uuid())
+  incidentId   String
+  incident     Incident         @relation(fields: [incidentId], references: [id])
+  assignedToId String
+  assignedTo   User             @relation("AssignedTo", fields: [assignedToId], references: [id]) // Responder/Volunteer
+  title        String
+  description  String
+  status       AssignmentStatus @default(PENDING)
+  dueDate      DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}
+
+model Shelter {
+  id               String   @id @default(uuid())
+  name             String
+  location         String // Geo-coordinate string (e.g., "lat,lng")
+  capacity         Int
+  currentOccupancy Int      @default(0)
+  contactPhone     String?
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  checkins  ShelterCheckin[]
+  inventory Inventory[]
+}
+
+model ShelterCheckin {
+  id           String    @id @default(uuid())
+  shelterId    String
+  shelter      Shelter   @relation(fields: [shelterId], references: [id])
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  checkInTime  DateTime  @default(now())
+  checkOutTime DateTime?
+
+  @@unique([shelterId, userId]) // A user can only be checked in once per shelter at a time (simplified)
+}
+
+model Assessment {
+  id           String   @id @default(uuid())
+  incidentId   String
+  incident     Incident @relation(fields: [incidentId], references: [id])
+  assessorId   String
+  assessor     User     @relation(fields: [assessorId], references: [id]) // Responder/Admin
+  damageReport String
+  needsReport  String
+  photos       String[] // Array of photo URLs (or keys if using S3/GCS)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Inventory {
+  id            String        @id @default(uuid())
+  shelterId     String
+  shelter       Shelter       @relation(fields: [shelterId], references: [id])
+  itemName      String
+  type          InventoryType
+  quantity      Int
+  unit          String // e.g., "units", "liters", "boxes"
+  lastUpdatedBy String // User ID of the person who updated it
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  resourceLogs  ResourceLog[]
+}
+
+model ResourceLog {
+  id                String          @id @default(uuid())
+  inventoryId       String? // Optional: Link to a specific inventory item
+  inventory         Inventory?      @relation(fields: [inventoryId], references: [id])
+  logType           ResourceLogType
+  itemName          String
+  quantity          Int
+  unit              String
+  sourceDestination String // Where it came from (Inflow) or went (Outflow)
+  loggedBy          String // User ID of the logger
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+}
+
+// --- MESSAGING MODULE ---
+
+model Conversation {
+  id           String   @id @default(uuid())
+  title        String?
+  // User IDs participating in the conversation
+  participants String[]
+  isGroupChat  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  messages Message[]
+  user     User?     @relation(fields: [userId], references: [id])
+  userId   String?
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id])
+  content        String
+  sentAt         DateTime     @default(now())
+}
