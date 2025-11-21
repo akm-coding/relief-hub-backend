@@ -13,8 +13,8 @@ import { NotFoundError } from "./utils/httpErrors";
 // Import All Routes
 import authRoutes from "./modules/auth/auth.routes";
 import usersRoutes from "./modules/users/users.routes";
-// import hazardZoneRoutes from "./modules/hazard-zones/hazard-zones.routes";
-// import warningRoutes from "./modules/warnings/warnings.routes";
+import hazardZoneRoutes from "./modules/hazard-zones/hazard-zones.routes";
+import warningRoutes from "./modules/warnings/warnings.routes";
 // import checklistRoutes from "./modules/checklist/checklist.routes";
 // import drillRoutes from "./modules/drills/drills.routes";
 // import incidentRoutes from "./modules/incidents/incidents.routes";
@@ -40,8 +40,10 @@ app.use(
 app.use(express.json()); // For parsing application/json
 
 // --- API Routes ---
-app.use("/auth", authRoutes);
-app.use("/users", usersRoutes);
+app.use("/v1/auth", authRoutes);
+app.use("/v1/users", usersRoutes);
+app.use("/v1/hazard-zones", hazardZoneRoutes);
+app.use("/v1/warnings", warningRoutes);
 
 // Health Check
 app.get("/", (req, res) => {
